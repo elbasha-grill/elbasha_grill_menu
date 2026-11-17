@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>لوحة التحكم – مشويات الباشا</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0807;--card:#1e1512;--line:rgba(201,162,75,.28);--gold:#c9a24b;--gl:#f0d58a;--cream:#efe3cc;--mut:#b8a88c;--red:#9a1010}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--cream);font:400 16px/1.6 Cairo,system-ui,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{width:100%;background:#120c0a;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--gl);outline-offset:1px}
+button{background:#2a1c17;border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button.pri{background:var(--gold);color:#1a0f08;border-color:var(--gold);font-weight:700}
+button.del{color:#ff8f8f}
+.wrap{max-width:760px;margin:0 auto;padding:0 12px 90px}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 12px}
+header .in{max-width:760px;margin:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1;color:var(--gl)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:10px 0;scrollbar-width:thin}
+.chips button{white-space:nowrap}
+.chips button.on{background:var(--gold);color:#1a0f08;border-color:var(--gold)}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
+.row{display:flex;gap:8px;align-items:center;margin:6px 0}
+.row>*{min-width:0}
+.row label{flex:0 0 auto;color:var(--mut);font-size:14px}
+.sz{display:flex;gap:6px;margin:4px 0}
+.sz input:last-of-type{max-width:110px}
+.mut{color:var(--mut);font-size:14px}
+.off{opacity:.55}
+.chk{display:flex;gap:6px;align-items:center;width:auto;color:var(--mut);font-size:14px}
+.chk input{width:auto}
+.login{max-width:420px;margin:12vh auto;padding:0 14px}
+.login h1{color:var(--gl)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#2a1c17;border:1px solid var(--gold);padding:10px 16px;border-radius:10px;z-index:20;max-width:92vw;display:none}
+#toast.err{border-color:#ff6b6b;color:#ffb3b3}
+#dlg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:15;display:none;align-items:center;justify-content:center;padding:14px}
+#dlg>div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;max-width:460px;width:100%;max-height:80vh;overflow:auto}
+#dlg li{list-style:none;margin:6px 0}
+#dlg li button{width:100%;text-align:right}
+.dot{color:var(--gl)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" role="status"></div>
+<div id="dlg"><div id="dlgb"></div></div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s), LS=localStorage, app=$('#app');
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let cfg=null,D=null,sha='',cur=0,dirty=false,busy=false;
+try{cfg=JSON.parse(LS.getItem('adm_cfg'))}catch(e){}
+
+/* ---- GitHub API ---- */
+async function api(p,o){
+  const r=await fetch('https://api.github.com/repos/'+cfg.repo+p,Object.assign({cache:'no-store'},o,{headers:{Authorization:'Bearer '+cfg.token,Accept:'application/vnd.github+json'}}));
+  if(!r.ok){const e=await r.json().catch(()=>({}));const x=new Error(e.message||r.status);x.st=r.status;throw x}
+  return r.json();
+}
+const dec=b=>JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\s/g,'')),c=>c.charCodeAt(0))));
+const enc=o=>{let s='';new TextEncoder().encode(JSON.stringify(o,null,2)).forEach(c=>s+=String.fromCharCode(c));return btoa(s)};
+function why(e){
+  if(e.st===401)return 'التوكن غلط أو منتهي. اعمل توكن جديد.';
+  if(e.st===403||e.st===404)return 'التوكن ملوش صلاحية على الريبو ده، أو اسم الريبو غلط. لازم صلاحية Contents: Read and write.';
+  if(e.st===409||e.st===422)return 'الملف اتغيّر من مكان تاني. حدّث الصفحة وكرر التعديل.';
+  return 'حصلت مشكلة: '+e.message;
+}
+function toast(m,bad){const t=$('#toast');t.textContent=m;t.className=bad?'err':'';t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display='none',bad?7000:4500)}
+
+/* ---- screens ---- */
+function login(err){
+  app.innerHTML=`<div class="login"><h1>لوحة تحكم المنيو</h1>
+  <p class="mut">أول مرة بس: ادخل اسم الريبو والتوكن. بيتحفظوا في متصفحك أنت فقط.</p>
+  <p class="row"><label for="lr">الريبو</label><input id="lr" dir="ltr" value="${esc(cfg&&cfg.repo||'moazelshazly23/elbasha-menu')}"></p>
+  <p class="row"><label for="lt">التوكن</label><input id="lt" type="password" dir="ltr" autocomplete="off"></p>
+  ${err?`<p class="dot" role="alert">${esc(err)}</p>`:''}
+  <button class="pri" data-a="login">دخول</button></div>`;
+}
+async function load(){
+  try{
+    const f=await api('/contents/menu.json?ref=main');
+    sha=f.sha;D=dec(f.content);dirty=false;cur=0;render();
+  }catch(e){login(why(e))}
+}
+const sec=()=>D.menu[cur], items=()=>sec().groups[0].items;
+function render(){
+  const chips=D.menu.map((s,i)=>`<button data-a="tab" data-n="${i}" class="${cur===i?'on':''}">${esc(s.title)}</button>`).join('')
+   +`<button data-a="tab" data-n="-1" class="${cur===-1?'on':''}">الإعدادات</button><button data-a="addsec">+ قسم</button>`;
+  app.innerHTML=`<header><div class="in"><h1>لوحة التحكم${dirty?' <span class="dot">• تعديلات غير منشورة</span>':''}</h1>
+  <button class="pri" data-a="pub">نشر</button><button data-a="hist">النسخ السابقة</button><button data-a="out">خروج</button></div></header>
+  <div class="wrap"><div class="chips">${chips}</div>${cur===-1?settings():section()}</div>`;
+}
+function settings(){
+  const s=D.settings;
+  return `<div class="box"><div class="row"><label for="s1">رقم واتساب (بصيغة دولية بدون +)</label></div>
+  <input id="s1" dir="ltr" data-f="s_wa" value="${esc(s.wa)}">
+  <label class="chk" style="margin-top:12px"><input type="checkbox" data-f="s_closed" ${s.closed?'checked':''}> المطعم مقفول (يوقف إرسال الطلبات)</label>
+  <div class="row"><label for="s2">رسالة القفل</label></div><input id="s2" data-f="s_closedMsg" value="${esc(s.closedMsg)}"></div>`;
+}
+function section(){
+  const s=sec(),it=items();
+  let h=`<div class="box"><div class="row"><input aria-label="اسم القسم" data-f="title" value="${esc(s.title)}">
+  <button data-a="secup">↑</button><button data-a="secdn">↓</button><button class="del" data-a="secdel">حذف القسم</button></div>
+  <input aria-label="ملاحظة القسم" placeholder="ملاحظة تظهر تحت اسم القسم (اختياري)" data-f="note" value="${esc(s.note)}">
+  <div class="row" style="margin-top:10px"><label for="pct">تغيير الأسعار %</label><input id="pct" type="number" step="1" placeholder="مثلاً 10 أو -5" style="max-width:130px">
+  <select id="pscope" style="max-width:140px"><option value="sec">القسم ده</option><option value="all">المنيو كله</option></select>
+  <label class="chk"><input type="checkbox" id="r5" checked> أقرب 5</label><button data-a="bulk">طبّق</button></div></div>`;
+  it.forEach((x,i)=>{
+    const cards=s.groups[0].kind==='cards';
+    h+=`<div class="box ${x.off?'off':''}"><div class="row"><input aria-label="اسم الصنف" data-i="${i}" data-f="n" value="${esc(x.n)}">
+    <button data-a="up" data-i="${i}" aria-label="أعلى">↑</button><button data-a="dn" data-i="${i}" aria-label="أسفل">↓</button><button class="del" data-a="del" data-i="${i}" aria-label="حذف">✕</button></div>`;
+    if(x.s){
+      x.s.forEach((z,k)=>{h+=`<div class="sz"><input aria-label="الحجم" data-i="${i}" data-k="${k}" data-w="0" value="${esc(z[0])}"><input aria-label="السعر" type="number" inputmode="decimal" data-i="${i}" data-k="${k}" data-w="1" value="${esc(z[1])}"><button class="del" data-a="delsz" data-i="${i}" data-k="${k}" aria-label="حذف الحجم">✕</button></div>`});
+      h+=`<div class="row"><button data-a="addsz" data-i="${i}">+ حجم</button><button data-a="single" data-i="${i}">سعر واحد</button></div>`;
+    }else{
+      h+=`<div class="row"><label>السعر</label><input type="number" inputmode="decimal" data-i="${i}" data-f="p" value="${esc(x.p)}" style="max-width:130px"><button data-a="sizes" data-i="${i}">أحجام</button></div>`;
+    }
+    if(cards)h+=`<textarea rows="2" aria-label="الوصف" placeholder="الوصف (اختياري). افصل المكونات بـ ' + ' لتظهر كقائمة" data-i="${i}" data-f="d">${esc(x.d)}</textarea>
+      <div class="row"><input aria-label="شارة" placeholder="شارة (اختياري)" data-i="${i}" data-f="badge" value="${esc(x.badge)}">
+      <label class="chk"><input type="checkbox" data-i="${i}" data-f="featured" ${x.featured?'checked':''}> مميز</label></div>`;
+    h+=`<label class="chk"><input type="checkbox" data-i="${i}" data-f="off" ${x.off?'checked':''}> غير متاح اليوم (مخفي عن الزباين)</label></div>`;
+  });
+  return h+`<button class="pri" data-a="add">+ صنف جديد</button>`;
+}
+
+/* ---- editing ---- */
+function mark(){if(!dirty){dirty=true;const h=$('header h1');if(h)h.innerHTML='لوحة التحكم <span class="dot">• تعديلات غير منشورة</span>'}}
+app.addEventListener('input',e=>{
+  const t=e.target,i=t.dataset.i,f=t.dataset.f,v=t.type==='checkbox'?t.checked:t.value;
+  if(t.dataset.k!==undefined){const z=items()[i].s[t.dataset.k];z[t.dataset.w]=t.dataset.w==='1'?(t.value===''?'':+t.value):t.value;mark();return}
+  if(!f)return;
+  if(f.startsWith('s_')){D.settings[f.slice(2)]=v;mark();return}
+  const o=i!==undefined?items()[i]:sec();
+  if(f==='n'||f==='title')o[f]=v;
+  else if(f==='p')o.p=v===''?'':+v;
+  else if(v===false||v==='')delete o[f];
+  else o[f]=v;
+  if(f==='off'){t.closest('.box').classList.toggle('off',v)}
+  mark();
+});
+const mv=(a,i,d)=>{const j=i+d;if(j<0||j>=a.length)return false;[a[i],a[j]]=[a[j],a[i]];return true};
+function check(){
+  for(const s of D.menu){
+    if(!String(s.title).trim())return 'فيه قسم من غير اسم';
+    for(const x of s.groups[0].items){
+      if(!String(x.n).trim())return 'فيه صنف من غير اسم في قسم '+s.title;
+      const ps=x.s?x.s.map(z=>z[1]):[x.p];
+      if(x.s&&!x.s.length)return 'الصنف "'+x.n+'" ملوش أحجام';
+      if(x.s&&x.s.some(z=>!String(z[0]).trim()))return 'الصنف "'+x.n+'" فيه حجم من غير اسم';
+      if(ps.some(p=>p===''||isNaN(p)||p<0))return 'سعر الصنف "'+x.n+'" مش صحيح';
+    }
+  }
+  if(!String(D.settings.wa).replace(/\D/g,''))return 'رقم الواتساب فاضي';
+  return '';
+}
+async function publish(){
+  if(busy)return;const bad=check();if(bad)return toast(bad,1);
+  busy=true;toast('جاري النشر…');
+  try{
+    const r=await api('/contents/menu.json',{method:'PUT',body:JSON.stringify({message:'تحديث المنيو من لوحة التحكم',content:enc(D),sha,branch:'main'})});
+    sha=r.content.sha;dirty=false;render();toast('تم النشر. التغيير بيظهر للزباين خلال دقيقة أو اتنين.');
+  }catch(e){toast(why(e),1)}
+  busy=false;
+}
+async function history(){
+  try{
+    const cs=await api('/commits?path=menu.json&per_page=12&sha=main');
+    $('#dlgb').innerHTML='<h2 style="margin-top:0">النسخ السابقة</h2><p class="mut">اختار نسخة لتحميلها في اللوحة. مش هتتنشر غير لما تضغط نشر.</p><ul style="padding:0">'+
+      cs.map(c=>`<li><button data-a="restore" data-sha="${c.sha}">${esc(new Date(c.commit.committer.date).toLocaleString('ar-EG'))}</button></li>`).join('')+'</ul><button data-a="close">إغلاق</button>';
+    $('#dlg').style.display='flex';
+  }catch(e){toast(why(e),1)}
+}
+app.addEventListener('click',clk);$('#dlg').addEventListener('click',clk);
+async function clk(e){
+  const b=e.target.closest('[data-a]');if(!b)return;
+  const a=b.dataset.a,i=+b.dataset.i,k=+b.dataset.k;
+  if(a==='close'||e.target.id==='dlg'){$('#dlg').style.display='none';return}
+  if(a==='login'){
+    cfg={repo:$('#lr').value.trim(),token:$('#lt').value.trim()||(cfg&&cfg.token)||''};
+    if(!cfg.repo||!cfg.token)return login('ادخل الريبو والتوكن');
+    LS.setItem('adm_cfg',JSON.stringify(cfg));return load();
+  }
+  if(a==='out'){if(dirty&&!confirm('فيه تعديلات غير منشورة. تخرج وتفقدها؟'))return;LS.removeItem('adm_cfg');cfg=null;dirty=false;return login()}
+  if(a==='pub')return publish();
+  if(a==='hist')return history();
+  if(a==='restore'){
+    try{const f=await api('/contents/menu.json?ref='+b.dataset.sha);D=dec(f.content);cur=0;dirty=true;$('#dlg').style.display='none';render();toast('تم تحميل النسخة. اضغط نشر لو عايز ترجع لها.')}
+    catch(x){toast(why(x),1)}return;
+  }
+  const it=D&&cur>=0?items():null;
+  if(a==='tab')cur=+b.dataset.n;
+  else if(a==='addsec'){D.menu.push({id:'s'+Date.now().toString(36),title:'قسم جديد',note:'',groups:[{kind:'cards',items:[]}]});cur=D.menu.length-1;mark()}
+  else if(a==='secup'){if(mv(D.menu,cur,-1)){cur--;mark()}}
+  else if(a==='secdn'){if(mv(D.menu,cur,1)){cur++;mark()}}
+  else if(a==='secdel'){if(!confirm('حذف قسم "'+sec().title+'" بكل أصنافه؟'))return;D.menu.splice(cur,1);cur=Math.max(0,cur-1);mark()}
+  else if(a==='add'){it.push({n:'صنف جديد',p:0});mark()}
+  else if(a==='up'){if(mv(it,i,-1))mark()}
+  else if(a==='dn'){if(mv(it,i,1))mark()}
+  else if(a==='del'){if(!confirm('حذف "'+it[i].n+'"؟'))return;it.splice(i,1);mark()}
+  else if(a==='sizes'){it[i].s=[['',it[i].p||0]];delete it[i].p;mark()}
+  else if(a==='single'){it[i].p=it[i].s[0]?it[i].s[0][1]:0;delete it[i].s;mark()}
+  else if(a==='addsz'){it[i].s.push(['',0]);mark()}
+  else if(a==='delsz'){it[i].s.splice(k,1);mark()}
+  else if(a==='bulk'){
+    const pct=parseFloat($('#pct').value);if(isNaN(pct)||!pct)return toast('اكتب نسبة التغيير',1);
+    const r5=$('#r5').checked,rd=x=>{x=x*(1+pct/100);return r5?Math.round(x/5)*5:Math.round(x)};
+    const secs=$('#pscope').value==='all'?D.menu:[sec()];let n=0;
+    secs.forEach(s=>s.groups[0].items.forEach(x=>{if(x.s)x.s.forEach(z=>{z[1]=rd(+z[1]||0);n++});else{x.p=rd(+x.p||0);n++}}));
+    if(!n)return;toast('اتغيّر '+n+' سعر ('+(pct>0?'+':'')+pct+'%). راجعهم واضغط نشر.');mark();
+  }
+  render();
+}
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
+cfg&&cfg.token?load():login();
+</script>
+</body>
+</html>
